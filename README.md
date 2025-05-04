@@ -28,7 +28,7 @@ This project addresses these challenges by implementing the following key steps:
 
 ## 🏗️ **Architecture Overview**
 
-![Netflix Azure Data Engineering Architecture](https://raw.githubusercontent.com/yourusername/Netflix-Azure-Data-Engineering-Project/main/img/architecture.png)
+![Netflix Azure Data Engineering Architecture](https://raw.githubusercontent.com/girald02/Azure-Netflix-Project-4/refs/heads/main/img/Azure_Netflix_Project_Architecture.png)
 
 ---
 
