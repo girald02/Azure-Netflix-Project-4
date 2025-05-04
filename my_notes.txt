@@ -1,0 +1,269 @@
+Data 
+Tablue data
+repository - Netflix Azuer Data Enginering pject
+
+
+Netflix Project
+RG-NetflixProject
+
+Datalake:
+Bronze
+Silver
+Gold
+raw
+
+Tools:
+Azure Data Lake
+Azure Data Factory
+
+Notification
+Alerts& metrics
+
+Linked Service-  Connection
+
+Input
+Data Set 
+parameter:
+@{dataset().file_name}
+
+
+Output
+parameter:
+folder_name
+file_name
+
+
+[
+  {
+    "folder_name": "netflix_cast",
+    "file_name": "netflix_cast.csv"
+  },
+  {
+    "folder_name": "netflix_category",
+    "file_name": "netflix_category.csv"
+  },
+  {
+    "folder_name": "netflix_countries",
+    "file_name": "netflix_countries.csv"
+  },
+  {
+    "folder_name": "netflix_directors",
+    "file_name": "netflix_directors.csv"
+  }
+]
+
+In forloop / for each:
+@item().file_name
+@item().folder_name
+
+
+If you want to validate the pipeline before running you can use activity "Validation"
+- This validation can be run forever , it will not sucess until the condition is met
+
+Web Activity - GithubMetaData
+- Get meta data 
+   URL - 
+
+   Variables
+    githubmetadata  = "Set Variable" activity 
+
+Special Thing:
+1. You can see you pipeline history runs in "Pipeline runs"
+2. Notification - Alerts & Metricks if you want to add notification whenever the pipeline have faileds
+  > New Alert rule
+  > Configure notification
+  > Other tools "Logic Apps" 
+
+=====================================================================================================================
+Databricks
+- Access Connector = Use for connection for Databricks + Datalake
+- Set the accessconnector as have permission using "Storage Blob Contributor"
+
+On datarick
+- COpy the Resource ID key
+- Create a metastore = "Netflix Meta Store"
+- metastore@strgaccnetflixgirald.dfs.core.windows.net/
+- Create
+- Using catalog set your created workspace
+
+Catalog:
+- Create a catalog "Netflix Catalog"
+- All acount user
+
+
+Creating an External Location - Bronze , Silver , Gold
+- Creating a credentials - gift wrap
+- Create a creds 
+- Creating External Location
+      > bronze_ext
+         abfss://bronze@strgaccnetflixgirald.dfs.core.windows.net/
+         select "girald_creds"
+      > silver_ext
+         abfss://silver@strgaccnetflixgirald.dfs.core.windows.net/
+         select "girald_creds"
+      > gold_ext
+         abfss://gold@strgaccnetflixgirald.dfs.core.windows.net/ 
+         select "girald_creds"
+
+- Create a computer / cluster
+- Netflix Project Workspace:
+  - Create a notebook:
+     > 1. Autoloader
+
+Focusing on
+# Incremental Data loading usng AutoLoader:
+
+Autoloader - Directory Listing , File Notifications
+
+Directory Listing:
+> Autoloader reads the data from ADLS (Azure Data Lake Storage) and infers the schema, which is then stored at the Schema Location.
+> It also creates a Checkpoint Location to maintain the state of the stream (like a saved point).
+> The checkpoint folder is named "RocksDB".
+> Each file is read only once.
+
+Schema Evolution (e.g., raw file suddenly adds new columns):
+> Autoloader may fail when it encounters new fields not present in the existing schema.
+> It attempts to read the data from the data lake.
+> The schema from the Schema Location is used to validate the incoming data.
+> Autoloader caches the schema and stores it at the schema location.
+> When a mismatch occurs (e.g., new columns), it throws an UnknownFieldException.
+> It does not fail immediately. Before failing, Autoloader performs schema inference on the latest micro-batch and attempts to update the schema location with the new schema.
+> Databricks recommends configuring the Autoloader stream to automatically restart after such schema changes to continue processing with the updated schema.
+
+=============================================================================
+Silver Notebook
+> Creating a parametrize source and target location 
+> Parameter will fill on workflow
+> We should have lookup notebook / mapping values
+
+Workflows
+> Create a task from lookup
+> Then create another task for silver notebook , then use "Loop over this task" it's like an for each on datafactory
+				set : 
+				{{tasks.LookUp_Location.values.my_arr}}
+> In parameter set : 
+				{{input.source_folder}}
+				{{input.target_folder}}
+
+
+Silver Notebook Part2:
+> Creating a transformation
+> Creating a parameterize as well
+> Creating a worflow if else
+
+df = spark.read.format("delta")\
+      .option("header", "true")\
+      .option("inferschema", "true")\
+      .load("abfss://bronze@strgaccnetflixgirald.dfs.core.windows.net/netflix_titles")
+
+      #Import Essentials Libraries
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+
+
+# Fill for "NULL" values 
+df = df.fillna({'duration_minutes': 0, 'duration_seasons': 1})
+
+# Convert the string to integer
+df = df.withColumn("duration_minutes", df.duration_minutes.cast(IntegerType()))\
+        .withColumn("duration_seasons", df.duration_seasons.cast(IntegerType()))
+
+ #Split
+ df = df.withColumn("Short_Title", split(df.title, ":").getItem(0))
+
+ #Conditional
+ df = df.withColumn("type_flag" , when(df.type == "Movie", 1)\
+                                .when(df.type == "TV Show", 2)\
+                                .otherwise(0))
+
+#Rank Dense orderby desc
+df = df.withColumn("duration_ranking", dense_rank().over(Window.orderBy(df.duration_minutes.desc())))
+
+# Save df to sql within the notebook only
+df.createOrReplaceTempView("mydataframe")
+
+# Save df to sql within GLOBAL notebooks
+df.createOrReplaceGlobalTempView("myglobaldataframe")
+
+# Data Agrregate
+df.groupBy("type").agg(count("*").alias("total_count")).display()
+=======================================================================================
+Running a Pipeline/Workflow in Databricks on a Specific Date or Condition (Using Parameterization)
+=======================================================================================
+
+# Define a widget to accept the weekday as input
+dbutils.widgets.text("weekday", "7")
+var_weekday = int(dbutils.widgets.get("weekday"))
+
+# Set the value using task values
+dbutils.jobs.taskValues.set(key="weekoutput", value=var_weekday)
+
+=======================================================================================
+Accessing the Value from Another Task:
+=======================================================================================
+# Get the value from the 'fetchWeekDay' task
+var = dbutils.jobs.taskValues.get(taskKey="fetchWeekDay", key="weekoutput", debugValue="default_value")
+print(var)
+
+In the 'fetchWeekDay' Task:
+ 	You can dynamically fetch the day of the week using:
+	{{job.start_time.iso_weekday}}
+
+In the 'IfWeekDay' Conditional Task:
+	Compare the dynamically fetched weekday value with the one passed from the notebook:
+	{{tasks.fetchWeekDay.values.weekoutput}}
+This comparison will evaluate to True or False based on the condition.
+=======================================================================================
+
+
+Delta Live Table: Gold Layer notebooks
+> 
+
+looktables_rules = {
+    "rule_1" : "show_id is NOT NULL"
+}
+
+
+@dlt.table(
+    name = "gold_netflix_directors"
+)
+@dlt.expect_or_drop("rule_1", "show_id is NOT NULL")
+def myfunc():
+    df = spark.readStream.format("delta").load("abfss://silver@strgaccnetflixgirald.dfs.core.windows.net/netflix_directors")
+    return df
+
+
+
+ @dlt.table(
+    name = "gold_netflix_cast"
+)
+@dlt.expect_or_drop("rule_1", "show_id is NOT NULL")
+def myfunc():
+    df = spark.readStream.format("delta").load("abfss://silver@strgaccnetflixgirald.dfs.core.windows.net/netflix_cast")
+    return df
+
+
+@dlt.table(
+    name = "gold_netflix_category"
+)
+@dlt.expect_or_drop("rule_1", "show_id is NOT NULL")
+def myfunc():
+    df = spark.readStream.format("delta").load("abfss://silver@strgaccnetflixgirald.dfs.core.windows.net/netflix_category")
+    return df
+
+
+Adding of rules:
+master_data_rules = {
+    "rule1": "newFlag IS NOT NULL",
+    "rule2": "show_id IS NOT NULL"
+}
+
+
+@dlt.table
+
+@dlt.expect_all_or_drop(master_data_rules)
+def gold_netflix_titles():
+    df = spark.readStream.table("LIVE.gold_trns_netflix_titles")
+    df = df.withColumn("newFlag" , lit(1))
+    return df
+
